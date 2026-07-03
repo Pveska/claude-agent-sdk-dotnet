@@ -14,9 +14,10 @@ internal static class MessageParser
     /// Parse message from CLI output into typed Message objects.
     /// </summary>
     /// <param name="data">Raw message JSON from CLI output.</param>
-    /// <returns>Parsed Message object.</returns>
-    /// <exception cref="MessageParseException">If parsing fails or message type is unrecognized.</exception>
-    public static Message Parse(JsonElement data)
+    /// <returns>Parsed Message object, or null for unrecognized message types
+    /// (skipped so newer CLI versions don't crash older SDK versions).</returns>
+    /// <exception cref="MessageParseException">If parsing fails.</exception>
+    public static Message? Parse(JsonElement data)
     {
         if (data.ValueKind != JsonValueKind.Object)
         {
@@ -41,7 +42,9 @@ internal static class MessageParser
             "system" => ParseSystemMessage(data),
             "result" => ParseResultMessage(data),
             "stream_event" => ParseStreamEvent(data),
-            _ => throw new MessageParseException($"Unknown message type: {messageType}", data)
+            "rate_limit_event" => ParseRateLimitEvent(data),
+            // Skip unknown message types so newer CLI versions don't crash older SDKs.
+            _ => null
         };
     }
 
@@ -194,6 +197,42 @@ internal static class MessageParser
         catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
         {
             throw new MessageParseException($"Missing required field in stream_event message: {ex.Message}", data);
+        }
+    }
+
+    private static RateLimitEvent ParseRateLimitEvent(JsonElement data)
+    {
+        try
+        {
+            var info = data.GetProperty("rate_limit_info");
+            return new RateLimitEvent
+            {
+                RateLimitInfo = new RateLimitInfo
+                {
+                    Status = info.GetProperty("status").GetString()!,
+                    ResetsAt = info.TryGetProperty("resetsAt", out var resets) && resets.ValueKind == JsonValueKind.Number
+                        ? resets.GetInt64()
+                        : null,
+                    RateLimitType = info.TryGetProperty("rateLimitType", out var type) ? type.GetString() : null,
+                    Utilization = info.TryGetProperty("utilization", out var util) && util.ValueKind == JsonValueKind.Number
+                        ? util.GetDouble()
+                        : null,
+                    OverageStatus = info.TryGetProperty("overageStatus", out var ostatus) ? ostatus.GetString() : null,
+                    OverageResetsAt = info.TryGetProperty("overageResetsAt", out var oresets) && oresets.ValueKind == JsonValueKind.Number
+                        ? oresets.GetInt64()
+                        : null,
+                    OverageDisabledReason = info.TryGetProperty("overageDisabledReason", out var oreason)
+                        ? oreason.GetString()
+                        : null,
+                    Raw = info.Clone()
+                },
+                Uuid = data.GetProperty("uuid").GetString()!,
+                SessionId = data.GetProperty("session_id").GetString()!
+            };
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+        {
+            throw new MessageParseException($"Missing required field in rate_limit_event message: {ex.Message}", data);
         }
     }
 }

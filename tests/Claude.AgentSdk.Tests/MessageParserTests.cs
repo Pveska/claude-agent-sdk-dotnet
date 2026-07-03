@@ -148,14 +148,45 @@ public class MessageParserTests
     }
 
     [Fact]
-    public void Parse_ThrowsOnUnknownType()
+    public void Parse_ReturnsNullOnUnknownType()
     {
+        // Python parity: unknown message types are skipped so newer CLI
+        // versions don't crash older SDK versions.
         var json = JsonSerializer.Deserialize<JsonElement>("""
         {
             "type": "unknown_type"
         }
         """);
 
-        Assert.Throws<MessageParseException>(() => MessageParser.Parse(json));
+        Assert.Null(MessageParser.Parse(json));
+    }
+
+    [Fact]
+    public void Parse_RateLimitEvent()
+    {
+        var json = JsonSerializer.Deserialize<JsonElement>("""
+        {
+            "type": "rate_limit_event",
+            "uuid": "abc-123",
+            "session_id": "session-1",
+            "rate_limit_info": {
+                "status": "allowed_warning",
+                "resetsAt": 1751500000,
+                "rateLimitType": "five_hour",
+                "utilization": 0.85
+            }
+        }
+        """);
+
+        var message = MessageParser.Parse(json);
+
+        var rateLimitEvent = Assert.IsType<RateLimitEvent>(message);
+        Assert.Equal("abc-123", rateLimitEvent.Uuid);
+        Assert.Equal("session-1", rateLimitEvent.SessionId);
+        Assert.Equal("allowed_warning", rateLimitEvent.RateLimitInfo.Status);
+        Assert.Equal(1751500000L, rateLimitEvent.RateLimitInfo.ResetsAt);
+        Assert.Equal("five_hour", rateLimitEvent.RateLimitInfo.RateLimitType);
+        Assert.Equal(0.85, rateLimitEvent.RateLimitInfo.Utilization);
+        Assert.Null(rateLimitEvent.RateLimitInfo.OverageStatus);
     }
 }

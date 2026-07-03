@@ -61,6 +61,30 @@ public sealed class SubprocessTransportTests
     }
 
     [Fact]
+    public void BuildCommand_WithShortPrompt_PassesPromptOnCommandLine()
+    {
+        var cmd = MakeTransport(OptionsWithDummyCli().Build()).BuildCommand();
+
+        Assert.Contains("--print", cmd);
+        Assert.Contains("--", cmd);
+        Assert.Contains("test", cmd);
+    }
+
+    [Fact]
+    public void BuildCommand_WithLongPrompt_DropsPromptFromCommandLine()
+    {
+        // Exceeds the command-line length limit on every OS (8k Windows / 100k elsewhere),
+        // so the prompt must be delivered via stdin instead of argv.
+        var longPrompt = new string('x', 120_000);
+        var transport = new SubprocessTransport(prompt: longPrompt, options: OptionsWithDummyCli().Build());
+        var cmd = transport.BuildCommand();
+
+        Assert.Contains("--print", cmd);
+        Assert.DoesNotContain(longPrompt, cmd);
+        Assert.DoesNotContain("--", cmd); // separator is removed together with the prompt
+    }
+
+    [Fact]
     public void BuildCommand_WithNullSystemPrompt_EmitsEmptySystemPromptFlag()
     {
         var options = OptionsWithDummyCli().Build();

@@ -369,6 +369,67 @@ public record StreamEvent : Message
     public string? ParentToolUseId { get; init; }
 }
 
+/// <summary>
+/// Rate limit status emitted by the CLI when rate limit state changes.
+/// </summary>
+public record RateLimitInfo
+{
+    /// <summary>
+    /// Current rate limit status. "allowed_warning" means approaching the limit;
+    /// "rejected" means the limit has been hit.
+    /// </summary>
+    [JsonPropertyName("status")]
+    public required string Status { get; init; }
+
+    /// <summary>Unix timestamp when the rate limit window resets.</summary>
+    [JsonPropertyName("resetsAt")]
+    public long? ResetsAt { get; init; }
+
+    /// <summary>Which rate limit window applies.</summary>
+    [JsonPropertyName("rateLimitType")]
+    public string? RateLimitType { get; init; }
+
+    /// <summary>Fraction of the rate limit consumed (0.0 - 1.0).</summary>
+    [JsonPropertyName("utilization")]
+    public double? Utilization { get; init; }
+
+    /// <summary>Status of overage/pay-as-you-go usage if applicable.</summary>
+    [JsonPropertyName("overageStatus")]
+    public string? OverageStatus { get; init; }
+
+    /// <summary>Unix timestamp when the overage window resets.</summary>
+    [JsonPropertyName("overageResetsAt")]
+    public long? OverageResetsAt { get; init; }
+
+    /// <summary>Why overage is unavailable if status is rejected.</summary>
+    [JsonPropertyName("overageDisabledReason")]
+    public string? OverageDisabledReason { get; init; }
+
+    /// <summary>Full raw object from the CLI, including any fields not modeled above.</summary>
+    [JsonIgnore]
+    public JsonElement Raw { get; init; }
+}
+
+/// <summary>
+/// Rate limit event emitted when rate limit info changes.
+/// </summary>
+/// <remarks>
+/// The CLI emits this whenever the rate limit status transitions (e.g. from
+/// "allowed" to "allowed_warning"). Use this to warn users before they hit a
+/// hard limit, or to gracefully back off when status is "rejected".
+/// </remarks>
+public record RateLimitEvent : Message
+{
+    [JsonPropertyName("rate_limit_info")]
+    public required RateLimitInfo RateLimitInfo { get; init; }
+
+    [JsonPropertyName("uuid")]
+    public required string Uuid { get; init; }
+
+    [JsonPropertyName("session_id")]
+    public required string SessionId { get; init; }
+}
+
 #endregion
 
 #region Permission Types

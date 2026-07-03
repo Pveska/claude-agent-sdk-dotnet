@@ -27,6 +27,7 @@ public class SubprocessTransport : ITransport
     private readonly List<string> _tempFiles = [];
 
     private Process? _process;
+    private bool _promptViaStdin;
     private StreamWriter? _stdin;
     private StreamReader? _stdout;
     private StreamReader? _stderr;
@@ -344,6 +345,7 @@ public class SubprocessTransport : ITransport
         }
 
         // Prompt handling - must come after all flags
+        _promptViaStdin = false;
         if (_isStreaming)
         {
             cmd.AddRange(["--input-format", "stream-json"]);
@@ -367,12 +369,22 @@ public class SubprocessTransport : ITransport
                     File.WriteAllText(tempFile, agentsJsonValue, Encoding.UTF8);
                     _tempFiles.Add(tempFile);
                     cmd[agentsIdx + 1] = $"@{tempFile}";
+                    cmdStr = string.Join(" ", cmd);
                 }
             }
             catch
             {
                 // Best-effort only.
             }
+        }
+
+        // If the command line is still too long (typically a large one-shot prompt),
+        // drop the positional prompt and feed it via stdin instead — `--print` without
+        // a prompt argument makes the CLI read the prompt from stdin until EOF.
+        if (!_isStreaming && cmdStr.Length > CmdLengthLimit)
+        {
+            cmd.RemoveRange(cmd.Count - 2, 2); // remove "--" and the prompt, keep --print
+            _promptViaStdin = true;
         }
 
         return cmd;
@@ -399,8 +411,14 @@ public class SubprocessTransport : ITransport
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = shouldReadStderr,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            // The CLI speaks UTF-8 on both pipes; without this, Windows defaults to the
+            // system code page and mangles non-ASCII prompts and responses.
+            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            StandardOutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
         };
+        if (shouldReadStderr)
+            startInfo.StandardErrorEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
         // Add arguments
         for (int i = 1; i < cmd.Count; i++)
@@ -438,8 +456,20 @@ public class SubprocessTransport : ITransport
             // Handle stdin based on mode
             if (!_isStreaming)
             {
-                // String mode: close stdin immediately
-                _stdin.Close();
+                // String mode: if the prompt was too long for the command line,
+                // deliver it via stdin; either way close stdin afterwards.
+                try
+                {
+                    if (_promptViaStdin)
+                        await _stdin.WriteAsync(_prompt.ToString().AsMemory(), cancellationToken);
+                    _stdin.Close();
+                }
+                catch (IOException)
+                {
+                    // Broken pipe: the CLI exited early. Its real error (exit code /
+                    // stderr) surfaces via ReadMessagesAsync, so don't fail here —
+                    // the enclosing catch would misreport it as CliNotFoundException.
+                }
                 _stdin = null;
             }
 
