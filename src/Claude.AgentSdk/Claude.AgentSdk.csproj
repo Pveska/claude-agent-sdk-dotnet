@@ -8,7 +8,7 @@
 
     <!-- Package Info -->
     <PackageId>Claude.AgentSdk</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>Elias Bachaalany</Authors>
     <Company>0xeb</Company>
     <Product>Claude Agent SDK</Product>
