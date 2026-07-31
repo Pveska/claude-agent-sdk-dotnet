@@ -385,9 +385,41 @@ public class SubprocessTransport : ITransport
         {
             cmd.RemoveRange(cmd.Count - 2, 2); // remove "--" and the prompt, keep --print
             _promptViaStdin = true;
+            cmdStr = string.Join(" ", cmd);
+        }
+
+        // If still too long, a large system prompt is on the command line. Spill it to a
+        // temp file and switch to the `-file` variant so the argument becomes a short path.
+        // Windows caps a process command line at 32767 chars; exceeding it makes Process.Start
+        // fail with Win32 error 206, which the SDK would otherwise surface as CliNotFoundException.
+        if (cmdStr.Length > CmdLengthLimit)
+        {
+            SpillArgToFile(cmd, "--system-prompt", "--system-prompt-file");
+            SpillArgToFile(cmd, "--append-system-prompt", "--append-system-prompt-file");
         }
 
         return cmd;
+    }
+
+    private void SpillArgToFile(List<string> cmd, string inlineFlag, string fileFlag)
+    {
+        var idx = cmd.IndexOf(inlineFlag);
+        if (idx < 0 || idx + 1 >= cmd.Count)
+            return;
+
+        try
+        {
+            var value = cmd[idx + 1];
+            var tempFile = Path.Combine(Path.GetTempPath(), $"claude-agent-sdk-prompt-{Guid.NewGuid():N}.txt");
+            File.WriteAllText(tempFile, value, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            _tempFiles.Add(tempFile);
+            cmd[idx] = fileFlag;
+            cmd[idx + 1] = tempFile;
+        }
+        catch
+        {
+            // Best-effort only.
+        }
     }
 
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
